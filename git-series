@@ -9,7 +9,7 @@
 
 function list_usage {
   cat >&2 <<EOS
-usage: git series list [options]
+usage: git series list [-a] [-v]
 
 List series in ascending order.
 
@@ -73,7 +73,7 @@ function list {
 
 function create_usage {
   cat >&2 <<EOS
-usage: git series create [options] <new-series> [commit]
+usage: git series create [-f] <new-series> [commit]
 
 Create a series at the commit specified.  If no commit is specified, creates the series at HEAD.
 
@@ -136,7 +136,7 @@ function create {
 
 function rename_usage {
   cat >&2 <<EOS
-usage: git series rename [options] <old-series> <new-series>
+usage: git series rename [-f] <old-series> <new-series>
 
 Rename a series.  The operation must be forced if there are releases of the series.
 
@@ -198,7 +198,7 @@ function rename {
 
 function delete_usage {
   cat >&2 <<EOS
-usage: git series delete [options] <series>
+usage: git series delete [-f] <series>
 
 Delete a series.  The operation must be forced if there are releases of the series.
 
@@ -442,16 +442,180 @@ function check {
   return $errors
 }
 
+#----------------------------------------------------------------------------------------------------------------------
+# git series check
+#----------------------------------------------------------------------------------------------------------------------
+
+function convert_usage {
+  cat >&2 <<EOS
+usage: git series convert [-r]
+
+Convert a gitflow repository to git-series (rewrites history).
+
+Options:
+   -r    repair any problems found
+EOS
+  exitScript
+}
+
+DESCENDANTS=/tmp/git-series-convert-descendants-00000
+
+function tagNewCommit {
+  commit=$1
+  tag=$2
+
+  echo "T $tag" >> $DESCENDANTS/$commit
+
+  processAncestry $commit
+}
+
+function getTree {
+  git cat-file -p $1 | grep ^tree | awk '{print $2}'
+}
+
+function processAncestry {
+  local commit=$1
+
+  if ! ( grep -x X $DESCENDANTS/$commit > /dev/null ); then
+    # X means that this commit has been visited
+    echo X >> $DESCENDANTS/$commit
+
+    local parents=$( git cat-file -p $commit | grep parent | awk '{print $2}' )
+    local parentCount=$( echo $parents | wc -w )
+    if [ $parentCount -eq 0 ]; then
+      echo $commit >> $DESCENDANTS/ROOTS
+    else
+      # git-flow merges have specific messages, version tags and a parent with the same tree.  That's how we can
+      # identify one.  When we identify one, we need to excise the master merge commit because it's annoying.
+
+      local versionTag sameParent hasGitFlowMessage
+
+      for tag in $( git tag --points-at $commit ); do
+        if [[ $tag =~ ^([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+          versionTag=$BASH_REMATCH
+        fi
+      done
+
+      if [ $parentCount -eq 2 ]; then
+        local tree=$( getTree $commit )
+        local sameParent
+        for parent in $parents; do
+          local parentTree=$( getTree $parent )
+          if [ $tree == $parentTree ]; then
+            sameParent=$parent
+          fi
+        done
+      fi
+
+      if $( git cat-file -p $commit | grep 'Merge branch ' > /dev/null ); then
+        hasGitFlowMessage=y
+      fi
+
+      echo $commit: versionTag=$versionTag sameParent=$sameParent hasGitFlowMessage=$hasGitFlowMessage
+
+      if [ -n "$versionTag" -a -n "$sameParent" -a -n "$hasGitFlowMessage" ]; then
+        echo "found a gitflow merge at $commit"
+        # replace all references to me with my sameParent
+        sed -i '' -e "s,$commit,$sameParent," $DESCENDANTS/*
+        processAncestry $parent
+      else
+        # process all parents (none are the same)
+        for parent in $parents; do
+          echo "D $commit" >> $DESCENDANTS/$parent
+          processAncestry $parent
+        done
+      fi
+    fi
+  fi
+}
+
+function convert {
+  while getopts ":r" opt; do
+    case $opt in
+      r)
+        repair=y
+        ;;
+      *)
+        convert_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -n "$1" ]; then
+    convert_usage
+  fi
+
+  errors=0
+
+  # Find all git-flow branches
+
+  releasePrefix=$(git config gitflow.prefix.release)
+  supportPrefix=$(git config gitflow.prefix.support)
+  featurePrefix=$(git config gitflow.prefix.feature)
+  hotfixPrefix=$(git config gitflow.prefix.hotfix)
+  master=$(git config gitflow.branch.master)
+  develop=$(git config gitflow.branch.develop)
+
+#  echo releasePrefix=$releasePrefix
+#  echo supportPrefix=$supportPrefix
+#  echo featurePrefix=$featurePrefix
+#  echo hotfixPrefix=$hotfixPrefix
+#  echo master=$master
+#  echo develop=$develop
+
+  local gitFlowVersions releaseBranches supportBranches hotfixBranches featureBranches masterBranches developBranches
+
+  while read ref; do
+    if [[ $ref =~ ^refs/tags/([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+      releases="$releases ${BASH_REMATCH[1]}"
+    elif [[ $ref =~ ^refs/(remotes/[^/]+|heads)/${releasePrefix}([0-9.]+)$ ]]; then
+      releaseBranches="$releaseBranches ${BASH_REMATCH}"
+    elif [[ $ref =~ ^refs/(remotes/[^/]+|heads)/${supportPrefix}([0-9.]+)$ ]]; then
+      supportBranches="$supportBranches ${BASH_REMATCH}"
+    elif [[ $ref =~ ^refs/(remotes/[^/]+|heads)/${featurePrefix}(.+)$ ]]; then
+      featureBranches="$featureBranches ${BASH_REMATCH}"
+    elif [[ $ref =~ ^refs/(remotes/[^/]+|heads)/${hotfixPrefix}([0-9.]+)$ ]]; then
+      hotfixBranches="$hotfixBranches $BASH_REMATCH"
+    elif [[ $ref =~ ^refs/(remotes/[^/]+|heads)/$master$ ]]; then
+      masterBranches="$masterBranches $BASH_REMATCH"
+    elif [[ $ref =~ ^refs/(remotes/[^/]+|heads)/$develop$ ]]; then
+      developBranches="$developBranches $BASH_REMATCH"
+    else
+      echo unknown branch: $ref
+    fi
+  done < <( git for-each-ref --format "%(refname)" )
+
+  echo releases=$releases
+  echo releaseBranches=$releaseBranches
+  echo supportBranches=$supportBranches
+  echo hotfixBranches=$hotfixBranches
+  echo featureBranches=$featureBranches
+  echo masterBranches=$masterBranches
+  echo developBranches=$developBranches
+
+  rm -rf $DESCENDANTS
+  mkdir -p $DESCENDANTS
+
+  for t in $releases; do
+    tagNewCommit $( resolve $t ) $t
+  done
+
+  return $errors
+}
+
 #=====================================================================================================================
 # USAGE
 #=====================================================================================================================
 
 function usage {
   echo "usage: git series list [-a] [-v]"
+  echo "   or: git series convert"
   echo "   or: git series create [-f] <new-series> [commit]"
-  echo "   or: git series rename <old-series> <new-series>"
-  echo "   or: git series delete <name>"
-  echo "   or: git series propagate [-d] [-i] [-u] <from-series> [to-series]"
+  echo "   or: git series rename [-f] <old-series> <new-series>"
+  echo "   or: git series delete [-f] <name>"
+  echo "   or: git series propagate [-d] [-n] [-c from-commit] [-t through-series] <from-series>"
+  echo "   or: git series check [-r]"
 
   exitScript
 }
@@ -470,6 +634,9 @@ shift
 case $action in
   list)
     list "$@"
+    ;;
+  convert)
+    convert "$@"
     ;;
   create)
     create "$@"

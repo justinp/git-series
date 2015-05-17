@@ -51,7 +51,7 @@ function list {
 
 function create_usage {
   cat >&2 <<EOS
-usage: git release create <new-release> [commit]
+usage: git release create [-f] <new-release> [commit]
 
 Creates a release at the commit specified.  If no commit is specified, creates the release at HEAD.
 
