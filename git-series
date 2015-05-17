@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# git-series - Copyright 2015 Justin Patterson - All Rights Reserved
-
 . $(dirname "$0")/git-series-common.sh
 . git-series-common.sh
 

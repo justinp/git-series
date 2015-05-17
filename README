@@ -1,0 +1,49 @@
+git series create 1.1
+git series
+
+git release 1.1
+
+git release 1.1
+ - automatically determine the next release and tag it
+
+git release 1.1 -n 4 (skip a micro)
+git release 1.1 [commit] - where to put the tag
+
+git series delete
+git series rename
+git series propagate 1.1 1.2
+  -u propagate unreleased commits
+
+
+invariants:
+  - newer releases should be descendants of older releases
+  - newer series should be descendants of older series (or unrelated)
+
+
+
+why no git-flow?
+ - master screws things up
+ - need to be able to support older released versions (releases)
+ - cleaner git history... better support for parallel development
+
+
+git series propagate <from-series> <to-series>
+ - no noop argument because it can cause problems (maybe allow only the first one to use the noop flag, that way
+   the merges can still pick up unpropagated changes on the intermediate series)
+
+Think about adding "next" or "develop" branch instead of current series.
+
+When creating a release, attempt to propagate the changes to all downstream series.  Once that's complete, apply the tag.
+If it fails, refuse to put the tag.
+
+propagate is idempotent.  When the user runs into a merge conflict or anything like that, the process will have to stop.
+They should be able to run the same command again and the work that they already did should automatically fly by, getting
+them to where they left off.
+
+Propagate always cascades to downstream releases (i.e., 1 -> 2, 2 -> 3, 3 -> 4 instead of 1 -> 2, 1 -> 3, 1 -> 4)
+
+Have a way to propagate from a specific commit down (i.e., leave some commits unpropagated)
+
+Best Practices
+ - propagate asap so that the guy who comes along behind you doesn't have to figure out if your changes should be propagated
+ - don't put older releases as descendants of newer releases

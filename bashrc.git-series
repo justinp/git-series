@@ -1,0 +1,141 @@
+#!bash
+
+_git_series ()
+{
+	local subcommands="create delete list propagate rename"
+	local subcommand="$(__git_find_on_cmdline "$subcommands")"
+
+#	echo args=$@
+#	echo subcommands=$subcommands
+#	echo subcommand=$subcommand
+#	echo COMP_WORDS=${COMP_WORDS[*]}
+#	echo COMP_CWORD=$COMP_CWORD
+
+	if [ -z "$subcommand" ]; then
+		__gitcomp "$subcommands"
+		return
+	fi
+
+	case "$subcommand" in
+		create)
+			__git_series_create
+			return
+			;;
+		delete)
+			__git_series_delete
+			return
+			;;
+		list)
+			__git_series_list
+			return
+			;;
+		propagate)
+			__git_series_propagate
+			return
+			;;
+		rename)
+			__git_series_rename
+			return
+			;;
+		*)
+			COMPREPLY=()
+			;;
+	esac
+}
+
+__git_series_create ()
+{
+	local subcommands="help"
+	local subcommand="$(__git_find_on_cmdline "$subcommands")"
+	if [ -z "$subcommand" ]; then
+		__gitcomp "$subcommands"
+		return
+	fi
+}
+
+__git_series_delete ()
+{
+	local hasF hasArg remainingWords=${COMP_WORDS[*]:3:$COMP_CWORD}
+
+  while getopts ":f" opt ${remainingWords[*]}; do
+    case $opt in
+      f)
+        hasF=y
+        ;;
+			*)
+				echo OPT=$opt
+				;;
+    esac
+
+    if [ "${#remainingWords[@]}" -gt 0 ]; then
+    	remainingWords=("${remainingWords[@]:$((OPTIND - 1))}")
+		fi
+  done
+
+  if [ -n "$remainingWords" ]; then
+    hasArg=y
+  fi
+
+	echo hasF=$hasF hasArg=$hasArg r=$remainingWords
+
+	__gitcomp "${hasF:+ -f} ${hasArg:-$(__git_series_list_series)}"
+}
+
+__git_series_release ()
+{
+	local subcommands="list start finish track publish help"
+	local subcommand="$(__git_find_on_cmdline "$subcommands")"
+	if [ -z "$subcommand" ]; then
+		__gitcomp "$subcommands"
+		return
+	fi
+	
+	case "$subcommand" in
+	finish)
+		__gitcomp "$(__git_series_list_branches 'release')"
+		return
+		;;
+	publish)
+		__gitcomp "$(comm -23 <(__git_series_list_branches 'release') <(__git_series_list_remote_branches 'release'))"
+		return
+		;;
+	track)
+		__gitcomp "$(comm -23 <(__git_series_list_remote_branches 'release') <(__git_series_list_branches 'release'))"
+		return
+		;;
+	*)
+		COMPREPLY=()
+		;;
+	esac
+
+}
+
+__git_series_hotfix ()
+{
+	local subcommands="list start finish help"
+	local subcommand="$(__git_find_on_cmdline "$subcommands")"
+	if [ -z "$subcommand" ]; then
+		__gitcomp "$subcommands"
+		return
+	fi
+
+	case "$subcommand" in
+	finish)
+		__gitcomp "$(__git_series_list_branches 'hotfix')"
+		return
+		;;
+	*)
+		COMPREPLY=()
+		;;
+	esac
+}
+
+__git_series_list_series ()
+{
+	git series list 2> /dev/null
+}
+
+__git_series_list_releases ()
+{
+	git release list 2> /dev/null
+}

@@ -1,5 +1,3 @@
-# git-series - Copyright 2015 Justin Patterson - All Rights Reserved
-
 TMP=/tmp/git-series-tmp-$$
 REPO=/tmp/git-series-test-repo-00000
 

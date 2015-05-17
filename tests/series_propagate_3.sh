@@ -1,6 +1,4 @@
-#!/bin/bash
-
-# git-series - Copyright 2015 Justin Patterson - All Rights Reserved
+#!/bin/sh
 
 . $(dirname $0)/common-propagate.sh
 

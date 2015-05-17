@@ -1,5 +1,3 @@
-# git-series - Copyright 2015 Justin Patterson - All Rights Reserved
-
 . $(dirname $0)/common-test.sh
 
 function readmeShouldBe {

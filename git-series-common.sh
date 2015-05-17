@@ -1,4 +1,4 @@
-# git-series - Copyright 2015 Justin Patterson - All Rights Reserved
+#!/bin/bash
 
 set -o pipefail
 
