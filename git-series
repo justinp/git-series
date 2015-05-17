@@ -1,0 +1,494 @@
+#!/bin/bash
+
+# git-series - Copyright 2015 Justin Patterson - All Rights Reserved
+
+. $(dirname "$0")/git-series-common.sh
+. git-series-common.sh
+
+#----------------------------------------------------------------------------------------------------------------------
+# git series list
+#----------------------------------------------------------------------------------------------------------------------
+
+function list_usage {
+  cat >&2 <<EOS
+usage: git series list [options]
+
+List series in ascending order.
+
+Options:
+   -a    all (include series that do not exist but whose presence is implied by releases)
+   -v    verbose (include more information about each series)
+EOS
+  exitScript
+}
+
+function addSeriesDetailsPipe {
+  while read series; do
+    releaseCount=$( listReleases | filterSeries $series | wc -l )
+    last=$( listReleases | filterSeries $series | tail -1 )
+    if $( seriesExists $series ); then
+      if [ -n "$last" ]; then
+        # TODO: this doesn't actually do what I want it to do which is show the shortest path from last release to series
+        commitCount=$( git log release/$last..series/$series --pretty=oneline --first-parent | wc -l )
+      else
+        commitCount=0
+      fi
+    else
+      commitCount=X
+    fi
+    printf "%s: releases:%-3d commits:%s\n" $series $releaseCount $commitCount
+  done
+}
+
+function list {
+  maybeDetailsPipe=cat
+
+  while getopts ":av" opt; do
+    case $opt in
+      a)
+        all=y
+        ;;
+      v)
+        maybeDetailsPipe=addSeriesDetailsPipe
+        ;;
+      *)
+        list_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -n "$1" ]; then
+    list_usage
+  fi
+
+  if [ "$all" = "y" ]; then
+    listImpliedSeries
+  else
+    listSeries
+  fi | sortVersions | $maybeDetailsPipe
+}
+
+#----------------------------------------------------------------------------------------------------------------------
+# git series create
+#----------------------------------------------------------------------------------------------------------------------
+
+function create_usage {
+  cat >&2 <<EOS
+usage: git series create [options] <new-series> [commit]
+
+Create a series at the commit specified.  If no commit is specified, creates the series at HEAD.
+
+Options:
+   -f    force (create the series even when/where you probably should not)
+EOS
+  exitScript
+}
+
+function create {
+  while getopts ":f" opt; do
+    case $opt in
+      f)
+        force=y
+        ;;
+      *)
+        create_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -z "$1" -o -n "$3" ]; then
+    create_usage
+  fi
+
+  series=$1
+  location=${2:-HEAD}
+
+  validateSeriesFormat $series
+  validateSeriesDoesNotExist $series
+
+  validateCommitExists $location
+
+  # See if there's already a release of this series.  If so, the last one should be an ancestor of $branchpoint.
+
+  lastRelease=$( lastReleaseForSeries $series )
+
+  if [ -z "$force" ]; then
+
+    if [ -n "$lastRelease" ]; then
+      if ( ! $( isAncestorOrSelf release/$lastRelease $location ) ); then
+        fatal "proposed series $series at $location would not descend from existing release $lastRelease"
+        mustForce=y
+      fi
+    fi
+
+  fi
+
+  if [ -z "$mustForce" ]; then
+    git branch series/$series $location
+  else
+    return 1
+  fi
+}
+
+#----------------------------------------------------------------------------------------------------------------------
+# git series rename
+#----------------------------------------------------------------------------------------------------------------------
+
+function rename_usage {
+  cat >&2 <<EOS
+usage: git series rename [options] <old-series> <new-series>
+
+Rename a series.  The operation must be forced if there are releases of the series.
+
+Options:
+   -f    force (rename the series even when you probably should not)
+EOS
+  exitScript
+}
+
+function rename {
+  while getopts ":f" opt; do
+    case $opt in
+      f)
+        force=y
+        ;;
+      *)
+        rename_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -z "$2" -o -n "$3" ]; then
+    rename_usage
+  fi
+
+  oldSeries=$1
+  newSeries=$2
+
+  validateSeriesFormat $oldSeries
+  validateSeriesExists $oldSeries
+
+  validateSeriesFormat $newSeries
+  validateSeriesDoesNotExist $newSeries
+
+  if [ -z "$force" ]; then
+
+    # See if there's a release of this series.  If so, the rename must be forced.
+
+    lastRelease=$( lastReleaseForSeries $oldSeries )
+
+    if [ -n "$lastRelease" ]; then
+      fatal "renaming a series with releases must be forced (-f)"
+      mustForce=y
+    fi
+
+  fi
+
+  if [ -z "$mustForce" ]; then
+    git branch -m series/$oldSeries series/$newSeries
+  else
+    return 1
+  fi
+}
+
+#----------------------------------------------------------------------------------------------------------------------
+# git series delete
+#----------------------------------------------------------------------------------------------------------------------
+
+function delete_usage {
+  cat >&2 <<EOS
+usage: git series delete [options] <series>
+
+Delete a series.  The operation must be forced if there are releases of the series.
+
+Options:
+   -f    force (delete the series even when you probably should not)
+EOS
+  exitScript
+}
+
+function delete {
+  while getopts ":f" opt; do
+    case $opt in
+      f)
+        force=y
+        ;;
+      *)
+        delete_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -z "$1" -o -n "$2" ]; then
+    delete_usage
+  fi
+
+  series=$1
+
+  validateSeriesFormat $series
+  validateSeriesExists $series
+
+  if [ -z "$force" ]; then
+
+    # See if there's a release of this series.  If so, the delete must be forced.
+
+    lastRelease=$( lastReleaseForSeries $series )
+
+    if [ -n "$lastRelease" ]; then
+      fatal "deleting a series with releases must be forced (-f)"
+      mustForce=y
+    fi
+
+  fi
+
+  if [ -z "$mustForce" ]; then
+    git branch -d series/$series
+  else
+    return 1
+  fi
+}
+
+#----------------------------------------------------------------------------------------------------------------------
+# git series propagate
+#----------------------------------------------------------------------------------------------------------------------
+
+function propagate_usage {
+# TODO: add more options here
+  cat >&2 <<EOS
+usage: git series propagate [-d] [-n] [-c from-commit] [-t through-series] <from-series>
+
+Propagate changes from an older series to one or more newer series.
+
+Options:
+   -c    the commit to propagate from (must be on the "from" series, defaults to the series itself)
+   -d    skip develop (defaults to propagating to the develop branch after all series, if it exists)
+   -n    no-op propagation (exclude the series commits from future series, only affects the first merge)
+   -t    the series to propagate through to before stopping (defaults to fully propagating)
+EOS
+  exitScript
+}
+
+function do_propagate_merge {
+  fromCommit=$1
+  toBranch=$2
+  fromLabel=$3
+  toLabel=$4
+  strategy=$5
+
+  msg="Propagating from $fromLabel to $toLabel"
+
+  echo $msg
+
+  git checkout -q $toBranch
+  git merge $fromCommit ${strategy:+-s $strategy} -m "$msg"
+}
+
+function propagate {
+  while getopts ":c:dnt:" opt; do
+    case $opt in
+      c)
+        fromCommit=$OPTARG
+        ;;
+      d)
+        skipDevelop=y
+        ;;
+      n)
+        strategy=ours
+        ;;
+      t)
+        toSeries=$OPTARG
+        ;;
+      *)
+        propagate_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -z "$1" -o -n "$2" ]; then
+    propagate_usage
+  fi
+
+  fromSeries=$1
+  fromCommit=${fromCommit:-series/$1}
+  toSeries=${toSeries:-$(listSeries | sortVersions | tail -1 )}
+
+#  echo fromCommit=$fromCommit
+#  echo toSeries=$toSeries
+#  echo fromSeries=$fromSeries
+
+  validateSeriesFormat $fromSeries
+  validateSeriesExists $fromSeries
+
+  validateSeriesFormat $toSeries
+  validateSeriesExists $toSeries
+
+  validateCommitExists $fromCommit
+
+  if ! $( isAncestorOrSelf $fromCommit series/$fromSeries ); then
+    die "$fromCommit is not a commit on series $fromSeries"
+  fi
+
+  seriesFilter=${toSeries:+ takeUntil $toSeries}
+
+  while read toSeries; do
+
+#  echo fromCommit=$fromCommit
+#  echo toSeries=$toSeries
+#  echo fromSeries=$fromSeries
+
+    if [ "$fromCommit" != "series/$fromSeries" ]; then
+      fromLabel="$fromCommit (on series $fromSeries)"
+    else
+      fromLabel="series $fromSeries"
+    fi
+
+    do_propagate_merge $fromCommit series/$toSeries "$fromLabel" "series $toSeries${strategy:+ (noop)}" "$strategy"
+    if [ $? -ne 0 ]; then
+      return 1
+    fi
+
+    strategy=""
+    fromSeries=$toSeries
+    fromCommit=series/$toSeries
+  done < <( seriesAfter $fromSeries | $seriesFilter )
+
+  if [ -z "$skipDevelop" -a -z "$toSeries" ]; then
+    if $( canResolve develop ); then
+      do_propagate_merge $fromCommit develop "series $fromSeries" "develop${strategy:+ (noop)}" "$strategy"
+    fi
+  fi
+}
+
+#----------------------------------------------------------------------------------------------------------------------
+# git series check
+#----------------------------------------------------------------------------------------------------------------------
+
+function check_usage {
+# TODO: add more options here
+  cat >&2 <<EOS
+usage: git series check [-r]
+
+Sanity check the state of the repository.  Useful after making changes directly with git.
+
+Options:
+   -r    repair any problems found
+EOS
+  exitScript
+}
+
+function check {
+  while getopts ":r" opt; do
+    case $opt in
+      r)
+        repair=y
+        ;;
+      *)
+        check_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -n "$1" ]; then
+    check_usage
+  fi
+
+  errors=0
+
+  for s in $( listImpliedSeries ); do
+    priorRelease=
+    while read this; do
+      if [ -n "$priorRelease" ]; then
+        if $( ! isAncestor release/$priorRelease release/$this ); then
+          error "release $this does not descend from release $priorRelease"
+          (( errors++ ))
+        fi
+      fi
+      priorRelease=$this
+    done < <( listReleases | sortVersions | filterSeries $s )
+
+    lastRelease=$( lastReleaseForSeries $s )
+
+    if [ -n "$lastRelease" ]; then
+      if $( seriesExists $s ); then
+        if $( ! isAncestorOrSelf release/$lastRelease series/$s ); then
+          error "series $s does not descend from its last release $lastRelease"
+          (( errors++ ))
+        fi
+      fi
+
+      if $( canResolve release/$s.x ); then
+        if [ $( resolve release/$s.x ) != $( resolve release/$lastRelease ) ]; then
+          error "tag $s.x does not coexist with release $lastRelease (run with -r to repair)"
+          if [ -n "$repair" ]; then
+            git tag -f release/$s.x release/$lastRelease
+          fi
+        fi
+      fi
+    else
+      if $( canResolve release/$series.x ); then
+        error "stray tag $s.x found without a coexistent release (run with -r to repair)"
+        if [ -n "$repair" ]; then
+          git tag -d release/$s.x
+        fi
+      fi
+    fi
+
+  done
+
+  return $errors
+}
+
+#=====================================================================================================================
+# USAGE
+#=====================================================================================================================
+
+function usage {
+  echo "usage: git series list [-a] [-v]"
+  echo "   or: git series create [-f] <new-series> [commit]"
+  echo "   or: git series rename <old-series> <new-series>"
+  echo "   or: git series delete <name>"
+  echo "   or: git series propagate [-d] [-i] [-u] <from-series> [to-series]"
+
+  exitScript
+}
+
+#=====================================================================================================================
+# MAIN COMMAND DISPATCHER
+#=====================================================================================================================
+
+if [ -z "$1" ]; then
+  usage
+fi
+
+action=$1
+shift
+
+case $action in
+  list)
+    list "$@"
+    ;;
+  create)
+    create "$@"
+    ;;
+  delete)
+    delete "$@"
+    ;;
+  rename)
+    rename "$@"
+    ;;
+  propagate)
+    propagate "$@"
+    ;;
+  check)
+    check "$@"
+    ;;
+  *)
+    usage
+    ;;
+esac

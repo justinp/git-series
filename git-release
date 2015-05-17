@@ -1,0 +1,219 @@
+#!/bin/bash
+
+# git-series - Copyright 2015 Justin Patterson - All Rights Reserved
+
+. $(dirname "$0")/git-series-common.sh
+. git-series-common.sh
+
+#----------------------------------------------------------------------------------------------------------------------
+# git release list
+#----------------------------------------------------------------------------------------------------------------------
+
+function list_usage {
+  cat >&2 <<EOS
+usage: git release list
+
+List all releases in ascending order.
+EOS
+  exitScript
+}
+
+function addReleaseDetailsPipe {
+  while read release; do
+    printf "%12s   %s\n" "$release" "$( getReleaseDate $release )"
+  done
+}
+
+function list {
+  maybeDetailsPipe=cat
+
+  # TODO: add sort-by-time option
+  while getopts ":v" opt; do
+    case $opt in
+      v) # undocumented option (because it stinks)
+        maybeDetailsPipe=addReleaseDetailsPipe
+        ;;
+      *)
+        list_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -n "$1" ]; then
+    list_usage
+  fi
+
+  listReleases | sortVersions | $maybeDetailsPipe
+}
+
+#----------------------------------------------------------------------------------------------------------------------
+# git release create
+#----------------------------------------------------------------------------------------------------------------------
+
+function create_usage {
+  cat >&2 <<EOS
+usage: git release create <new-release> [commit]
+
+Creates a release at the commit specified.  If no commit is specified, creates the release at HEAD.
+
+Options:
+   -f    force (create the release even when/where you probably should not)
+EOS
+  exitScript
+}
+
+function create {
+
+  while getopts ":f" opt; do
+    case $opt in
+      f)
+        force=y
+        ;;
+      *)
+        create_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -z "$1" -o -n "$3" ]; then
+    create_usage
+  fi
+
+  release=$1
+
+  validateReleaseFormat $release
+  validateReleaseDoesNotExist $release
+
+  series=$( seriesForRelease $release )
+
+  validateSeriesExists $series
+
+  location=${2:-HEAD}
+
+  if ! $( canResolve $location ); then
+    die "unable to resolve commit: $location"
+  fi
+
+  priorRelease=$( ( echo $release && listReleases | filterSeries $(seriesForRelease $release) ) | sortVersions | findPrior $release )
+  nextRelease=$( ( echo $release && listReleases | filterSeries $(seriesForRelease $release) ) | sortVersions | findNext $release )
+
+  if [ -z "$force" ]; then
+
+    if [ -n "$priorRelease" ]; then
+      if ! ( isAncestor release/$priorRelease $location ); then
+        fatal "proposed release $release would not strictly descend from existing release $priorRelease"
+        mustForce=y
+      fi
+    fi
+
+    if [ -n "$nextRelease" ]; then
+      if ! ( isAncestor $location release/$nextRelease ); then
+        fatal "existing release $nextRelease would not strictly descend from proposed release $release"
+        mustForce=y
+      fi
+    else
+      if ( seriesExists $series ); then
+        if ! ( isAncestorOrSelf $location series/$series ); then
+          fatal "series $series would not descend from proposed release $release"
+          mustForce=y
+        fi
+      fi
+    fi
+
+    expected=$( nextAvailableReleaseForSeries $series )
+    if [ $expected != $release ]; then
+      fatal "expected next release for series $series to be $expected, not $release"
+      mustForce=y
+    fi
+
+  fi
+
+  if [ -z "$mustForce" ]; then
+    git tag -a -m "$release" release/$release $location
+    updateLastReleaseWildcardTag $series
+  else
+    return 1
+  fi
+}
+
+#----------------------------------------------------------------------------------------------------------------------
+# git release delete
+#----------------------------------------------------------------------------------------------------------------------
+
+function delete_usage {
+  cat >&2 <<EOS
+Usage: git release delete <release>+
+
+Deletes a release.
+EOS
+  exitScript
+}
+
+function delete {
+  while getopts "f" opt; do
+    case $opt in
+      *)
+        delete_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -z "$1" ]; then
+    delete_usage
+  fi
+
+  while [ -n "$1" ]; do
+    release=$1
+
+    validateReleaseFormat $release
+    validateReleaseExists $release
+
+    git tag -d release/$release
+
+    series=$( seriesForRelease $release )
+    updateLastReleaseWildcardTag $series
+
+    shift
+  done
+}
+
+#=====================================================================================================================
+# USAGE
+#=====================================================================================================================
+
+function usage {
+  echo "usage: git release list"
+  echo "   or: git release create [-f] <new-series> [commit]"
+  echo "   or: git release delete <release>+"
+
+  exitScript
+}
+
+#=====================================================================================================================
+# MAIN COMMAND DISPATCHER
+#=====================================================================================================================
+
+if [ -z "$1" ]; then
+  usage
+fi
+
+action=$1
+shift
+
+case $action in
+  list)
+    list "$@"
+    ;;
+  create)
+    create "$@"
+    ;;
+  delete)
+    delete "$@"
+    ;;
+  *)
+    usage
+    ;;
+esac
