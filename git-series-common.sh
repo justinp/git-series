@@ -32,18 +32,26 @@ function isSeriesFormat {
   [[ $1 =~ ^[0-9]+\.[0-9]+$ ]]
 }
 
-#function isSeriesRefFormat {
-#  [[ $1 =~ ^series/[0-9]+\.[0-9]+$ ]]
-#}
+function isSeriesRefFormat {
+  [[ $1 =~ ^series/[0-9]+\.[0-9]+$ ]]
+}
+
+function extractSeriesFromRef {
+  [[ $1 =~ ^series/([0-9]+\.[0-9]+)$ ]] && echo ${BASH_REMATCH[1]}
+}
 
 function isReleaseFormat {
   [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
-#function isReleaseRefFormat {
-#  [[ $1 =~ ^release/[0-9]+\.[0-9]+\.[0-9]+$ ]]
-#}
-#
+function isReleaseRefFormat {
+  [[ $1 =~ ^release/([0-9]+\.[0-9]+\.[0-9]+)$ ]]
+}
+
+function extractReleaseFromRef {
+  isReleaseRefFormat $1 && echo ${BASH_REMATCH[1]}
+}
+
 ## Dies if the argument is not in a specific format
 
 function validateSeriesFormat {
@@ -564,7 +572,9 @@ function updateLastReleaseWildcardTag {
 }
 
 function getReleaseDate {
-  git cat-file -p $( git rev-parse release/$1 ) | grep ^tagger | sed -e 's,.*> ,,'
+  local origDate=$( git cat-file -p $( git rev-parse release/$1 ) | grep ^tagger | sed -e 's,.*> ,,' )
+  local iso8601date=$( TZ=UTC date -j -f '%a %b %d %H:%M:%S %Y %z' "$origDate" +'%Y-%m-%dT%H:%M:%SZ' )
+  echo $iso8601date
 }
 
 

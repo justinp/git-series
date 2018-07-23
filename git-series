@@ -443,6 +443,86 @@ function check {
 }
 
 #----------------------------------------------------------------------------------------------------------------------
+# git series identify
+#----------------------------------------------------------------------------------------------------------------------
+
+function identify_usage {
+  cat >&2 <<EOS
+usage: git series identify [commit]
+
+Produce an artifact version for the specifed commit (or HEAD, if not specified).
+EOS
+  exitScript
+}
+
+function releaseTagAt {
+  for tag in $(git tag -l --points-at $1); do
+    if $( isReleaseRefFormat $tag ); then
+      echo $tag
+    fi
+  done
+}
+
+
+function identify {
+  while getopts "" opt; do
+    case $opt in
+      *)
+        identify_usage
+        ;;
+    esac
+  done
+  shift $((OPTIND - 1))
+
+  if [ -n "$1" ]; then
+    identify_usage
+  fi
+
+  currentBranch=$(git symbolic-ref --short HEAD 2> /dev/null)
+  currentShortHash=$(git rev-parse --verify --short=8 HEAD 2> /dev/null)
+
+  if [ "$currentBranch" == "develop" ]; then
+    echo "develop $currentBranch" # TODO: get current develop version
+  elif $( isSeriesRefFormat $currentBranch ); then
+    series=$(extractSeriesFromRef $currentBranch)
+    echo "$series-$currentShortHash-SNAPSHOT"
+  elif $( isReleaseRefFormat $currentBranch ); then
+    release=$(extractReleaseFromRef $currentBranch)
+    echo $release
+  else
+    currentReleaseTag=$(releaseTagAt HEAD)
+    if [ -n "$currentReleaseTag" ]; then
+      extractReleaseFromRef $currentReleaseTag
+    else
+      echo "0.1-SNAPSHOT"
+    fi
+  fi
+
+#   * The identifiedVersion is determined by applying the following rules in order, stopping as soon as one succeeds:
+#   * 1) If the develop branch is checked out, the version is <next_release_version>-SNAPSHOT
+#   * 2) If a release branch is checked out, the version is <release-version>-SNAPSHOT
+#   * 3) If a hotfix branch is checked out, the version is <hotfix-version>-SNAPSHOT
+#   * 4) If a feature branch is checked out, the version is <next-release-version>-<feature-name>-SNAPSHOT
+#   * 5) If one and only one version tag refers to the current commit, the version is the same as the tag
+#   *    (If more than one version tag refers to the commit, an IllegalStateException is thrown)
+#   * 6) If one and only one release branch refers to the current commit, the version is <release-version>-SNAPSHOT
+#   *    (If more than one release branch refers to the commit, an IllegalStateException is thrown)
+#   * 7) If one and only one feature branch refers to the current commit, the version is <next-release-version>-<feature-name>-SNAPSHOT
+#   *    (If more than one feature branch refers to the commit, an IllegalStateException is thrown)
+#   * 8) If the develop branch refers to the current commit, the version is <next_release_version>-SNAPSHOT
+#   * 9) If one and only one hotfix branch refers to the current commit, the version is <hotfix-version>-SNAPSHOT
+#   *    (If more than one feature branch refers to the commit, an IllegalStateException is thrown)
+#   *
+#   * The following patterns are used to identify the branches:
+#   * release branch: release/<release-version>
+#   * hotfix branch: hotfix/<hotfix-version>
+#   * feature branch: feature/<feature-name>
+#   * develop branch: develop
+#   *
+#   * Version tags must match the pattern <major>.<minor>.<optional incremental> Regex: \d+\.\d+(\.\d+)?
+}
+
+#----------------------------------------------------------------------------------------------------------------------
 # git series check
 #----------------------------------------------------------------------------------------------------------------------
 
@@ -652,6 +732,9 @@ case $action in
     ;;
   check)
     check "$@"
+    ;;
+  identify)
+    identify "$@"
     ;;
   *)
     usage

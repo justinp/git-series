@@ -47,3 +47,81 @@ Have a way to propagate from a specific commit down (i.e., leave some commits un
 Best Practices
  - propagate asap so that the guy who comes along behind you doesn't have to figure out if your changes should be propagated
  - don't put older releases as descendants of newer releases
+
+Propagation needs to go from release branch to all open successor release branches, then to the series branch, then
+do the same for each successor series (propagate to the open release branches from oldest to newest, then to all the
+series).
+
+What about creating PRs for propagations instead of just merging them automatically?
+
+Propagate interactive? Like rebase interactive. Show the user all open successor branches (eligible for propagation)
+and then allow them to choose
+  1) propagate (merge the changes onto this branch)
+  2) exclude (do a null merge of these changes onto this branch)
+  3) defer (do no merge to this branch - someone will have to do it later or it will just get more confusing)
+
+Define sort order of branches: release in order, then series branch
+
+The artifact version
+ - when on a branch:
+   - "develop" - the next implied series + SHA + "SNAPSHOT"
+   - release - the release version + SHA + "SNAPSHOT"
+   - series - the series version + SHA + "SNAPSHOT"
+ - when on a commit with a release tag:
+   - the release version
+ - when on any other commit
+   - oldest branch + distance + SHA + "SNAPSHOT"
+     - "oldest branch" is the first branch in sorted order that has the current commit as an ancestor
+     - is "distance" actually useful here? Gives you an idea of how old it is at a glance, but does that matter?
+ - if not on a commit: "0.1-SNAPSHOT"
+
+
+release open 3.4.5 (create a release branch at this location)
+ - series 3.4 must be an ancestor
+ - release 3.4.5 must not exist
+ - release 3.4.4 should exist and be an ancestor
+release close 3.4.5 (create a tag at the head of the release branch and delete the branch - or specified)
+ - release branch 3.4.5 should exist
+ - release branch 3.4.4 should be an ancestor (this means propagations are up-to-date and is recursive)
+ - release branch should not have any open topic branches against it
+release tag 3.4.5 (create a release tag for this version at the head of the release branch - or specified)
+ - requires all of the requirements of open and close (since it's essentially one right after the other)
+release list
+ - lists all known releases
+
+
+Topic branches are created on any valid branches (series or release) and will be merged back into the same branch.
+Changes will also be propagated to all successive branches. You should do the work on the oldest series that will
+receive the changes.
+
+topic open 3.4 blah (create a topic branch 'blah' for series 3.4 at the head or specified location)
+topic close 3.4 blah (merge the topic branch 'blah' back into series 3.4)
+topic open 3.4.5 blah (create a topic branch 'blah' on release branch 3.4.5)
+ - there must be a release branch 3.4.5 (release 3.4.5 must be open)
+ - there must not already be a topic branch with the same name on the same release
+topic close 3.4.5 blah (merge the topic branch 'blah' into release branch 3.4.5 and delete it)
+ - release branch 3.4.5 must exist
+ - topic branch 3.4.5 must exist
+
+NO: topic release delete - just use "git tag -d" (not recommended)
+NO: topic abort 3.4.5 blah (delete the topic branch) - just use "git branch -D"
+
+git propagate
+
+usage: git propagate [-d] [-n] [-c from-commit] [-t through-series] <from-series>
+
+Propagate changes from an older series to one or more newer series.
+
+Options:
+   -c    the commit to propagate from (must be on the "from" series, defaults to the series itself)
+   -d    skip develop (defaults to propagating to the develop branch after all series, if it exists)
+   -n    no-op propagation (exclude the series commits from future series, only affects the first merge)
+   -t    the series to propagate through to before stopping (defaults to fully propagating)
+
+
+
+topic get 3.4.5 blah (get the ref for the specified topic branch, if it exists)
+
+git series rename
+ - can not be done if there are any closed releases
+ - renames all open releases + topics + the series itself
