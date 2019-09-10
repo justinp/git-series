@@ -188,8 +188,30 @@ You may choose to operate without a `develop` branch, especially if you
 want to manually control the naming of artifacts on the bleeding edge.
 
 
+### Semantic Version Inference
+
+Given the git metadata of a particular commit, tools can generate a
+unique, semantic version for the artifacts using the following rules
+in order from highest precedence to lowest:
+
+ * If the current branch matches the pattern `series/X.Y` then the
+   semantic version is `X.Y-SNAPSHOT`.
+ * If the current branch matches the pattern `topic/X.Y/name` then the
+   semantic version is `X.Y-name-SNAPSHOT`.
+ * If the current branch matches the pattern `release/X.Y.Z` then the
+   semantic version is `X.Y.Z-SNAPSHOT`.
+ * If there's a tag at `HEAD` that matches the pattern `release/X.Y.Z`
+   then the semantic version is `X.Y.Z`.
+
+where:
+ * the current branch is determined using `git rev-parse --abbrev-ref HEAD`
+ * tags at `HEAD` are determined using `git tag --points-at HEAD`
+
+
 ### Invariants
 
+This is a list of invariants that must hold true in the git metadata
+for the history to be consistent with respect to `git-series`.
 
 #### Sibling Ancestry
 
