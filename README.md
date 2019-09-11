@@ -1,7 +1,7 @@
 # git-series
 
 An intelligent way to manage multiple concurrently-deployed releases using
-in git.
+git.
 
 ## Motivation
 
@@ -9,7 +9,7 @@ I've used git-flow for a long time. It's great if you have a simple project
 that always only has one version deployed. In my experience, it happens more
 often than not that there are more than one version in production. Before
 you say "well, you write crappy old-school software," allow me to say that
-one of those situtation is multiple containerized microservices sharing 
+one of those situtations is multiple containerized microservices sharing 
 a common library. Since these microservices are isolated from each 
 other, they can choose to use whatever version of the library they desire.
 It's possible (maybe even likely) that the team maintaining one of those
