@@ -253,7 +253,7 @@ relation with its predecessor series.
 
 Realize that this does not imply that the change must be incorporated into 
 all future releases, just that you must make a decision and record it
-within the `git` metadata. Propagation the process of maintaining this
+within the `git` metadata. Propagation is the process of maintaining this
 invariant. For more details, see the [_Propagation_](#Propagation) section.
 
 > Note: These is not _really_ an invariant. It's an "eventually consistent."
